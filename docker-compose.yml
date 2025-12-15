@@ -1,0 +1,118 @@
+services:
+  # Main service for running bash scripts and training
+  cropclassifier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    image: cropclassifier:latest
+    container_name: cropclassifier-main
+    hostname: localhost
+    
+    # GPU configuration
+    # Simplified: use only runtime (deploy.resources may conflict with network_mode)
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - TF_GPU_THREAD_MODE=gpu_private
+      - PYTHONPATH=/workspace/preprocessing:/workspace/utils
+      # LD_LIBRARY_PATH: prioritize system libcuda (mounted by nvidia-container-toolkit), then CUDA libs
+      # Note: /usr/local/nvidia doesn't exist - nvidia-container-toolkit mounts to /usr/lib/x86_64-linux-gnu
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda-12.3/lib64:/usr/local/cuda/lib64
+      # Spark hostname fix - set before Java/Spark initialization
+      - SPARK_LOCAL_IP=127.0.0.1
+      - SPARK_DRIVER_HOST=localhost
+      - JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true
+    
+    # Volumes for persistence
+    volumes:
+      - ./:/workspace
+      - ./notebooks:/workspace/notebooks
+      - ./data:/workspace/data
+      - ./models:/workspace/models
+      - ./results:/workspace/results
+      - ./preprocessing:/workspace/preprocessing
+      - ./config:/workspace/config
+      - ./utils:/workspace/utils
+      # NOTE: Removed explicit NVIDIA library mounts - let nvidia-container-toolkit handle it
+      # Mounting libraries from host can cause version conflicts
+      # Mount NVIDIA device files explicitly (these should be handled by nvidia runtime, but explicit is safer)
+      # - /dev/nvidia0:/dev/nvidia0:rw
+      # - /dev/nvidiactl:/dev/nvidiactl:rw
+      # - /dev/nvidia-uvm:/dev/nvidia-uvm:rw
+      # - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools:rw
+    
+    # Keep container running
+    tty: true
+    stdin_open: true
+    
+    # Command: interactive bash
+    command: /bin/bash
+    
+    # Network mode
+    # TEMPORARILY DISABLED to test if this is causing CUDA_ERROR_UNKNOWN
+    # Spark uses local[*] mode, so host networking may not be necessary
+    # network_mode: "host"
+    # privileged: true
+    # Fix Spark hostname resolution by adding entry to /etc/hosts
+    extra_hosts:
+      - "cropclassifier-container:127.0.0.1"
+    # Port mappings (if needed for Spark UI or other services)
+    # ports:
+    #   - "4040:4040"  # Spark UI (optional)
+    
+    # Restart policy
+    restart: unless-stopped
+
+  # Separate service for JupyterLab (optional)
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    image: cropclassifier:latest
+    container_name: cropclassifier-jupyter
+    hostname: cropclassifier-jupyter
+    
+    # GPU configuration
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - TF_GPU_THREAD_MODE=gpu_private
+      - PYTHONPATH=/workspace/preprocessing:/workspace/utils
+      # LD_LIBRARY_PATH: prioritize system libcuda (mounted by nvidia-container-toolkit), then CUDA libs
+      # Note: /usr/local/nvidia doesn't exist - nvidia-container-toolkit mounts to /usr/lib/x86_64-linux-gnu
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/cuda-12.3/lib64:/usr/local/cuda/lib64
+    
+    # Ports
+    ports:
+      - "8888:8888"
+    
+    # Volumes (same as main service)
+    volumes:
+      - ./:/workspace
+      - ./notebooks:/workspace/notebooks
+      - ./data:/workspace/data
+      - ./models:/workspace/models
+      - ./results:/workspace/results
+      - ./preprocessing:/workspace/preprocessing
+      - ./config:/workspace/config
+      - ./utils:/workspace/utils
+    
+    # Keep container running
+    tty: true
+    stdin_open: true
+    
+    # Command: start JupyterLab
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+    
+    # Restart policy
+    restart: unless-stopped
+
+    # Only start if explicitly requested
+    profiles:
+      - jupyter

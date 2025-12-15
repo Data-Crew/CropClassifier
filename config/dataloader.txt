@@ -1,0 +1,56 @@
+[paths]
+train_path=data/valtrain/CDL_multiple_scene_ts.parquet/*/*2020*/*.parquet
+val_path=data/valtrain/CDL_multiple_scene_ts.parquet/*/*2022*/*.parquet
+test_path=data/test/CDL_unique_scene_ts.parquet/*/*2024*/*.parquet
+
+[hyperparams]
+model_name=simplecnn
+batch_size=256
+days_in_series=120
+days_per_bucket=5
+frames_to_check=2
+num_features=16
+max_epochs=60
+es_patience=15
+bucketing_strategy=random
+test_year=2024
+
+[targeted_crops]
+Soybeans
+Rice
+Corn
+Cotton
+
+[other_crops]
+Other Hay/Non Alfalfa
+Pop or Orn Corn
+Peanuts
+Sorghum
+Oats
+Peaches
+Clover/Wildflowers
+Pecans
+Sod/Grass Seed
+Other Crops
+Dry Beans
+Winter Wheat
+Alfalfa
+Potatoes
+Peas
+Herbs
+Rye
+Cantaloupes
+Sunflower
+Watermelons
+Sweet Corn
+Sweet Potatoes
+
+[label_legend]
+Uncultivated
+Cultivated
+No Crop Growing
+Soybeans
+Rice
+Corn
+Cotton
+

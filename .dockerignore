@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data (too large for Docker build context)
+data/CDL_samples.parquet/
+data/s2_final.parquet/
+data/train_ds_with_idx_*/
+data/val_ds_with_idx_*/
+data/dbfs_s2_dense_test.parquet/
+data/s2_dense_test.parquet/
+data/s2_dense_test_final.parquet/
+data/demodata/*/
+
+# Results
+results/logs/
+results/predictions/
+results/test/
+
+# Models (large files)
+results/models/*.keras/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+DOCKER_README.md
+docker-run.sh
+
+# Temporary files
+tmp/
+*.log
+*.tmp
+

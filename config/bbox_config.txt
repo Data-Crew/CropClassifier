@@ -1,0 +1,40 @@
+# ============================================================================
+# bbox_config.txt
+# ============================================================================
+# This file defines bounding boxes (bbox) and years for Sentinel-2 scenes.
+# It supports two execution modes in build_training_data.sh:
+#
+# ➤ UNIQUE mode:
+#   - Only the *first* non-comment line is used.
+#   - Useful for testing or processing a single scene.
+#
+# ➤ MULTIPLE mode:
+#   - All non-comment lines *after* the first one are used.
+#   - Used for batch downloading and processing multiple bbox/year combos.
+#
+# Format:
+# name|bbox|years
+# name = descriptive ID (no spaces)
+# bbox = xmin,ymin,xmax,ymax
+# years = comma-separated list (e.g., 2019,2020,2021)
+# ============================================================================
+# --- UNIQUE SCENE CONFIG ---
+example_unique_scene|510595,1539602,513210,1541564|2024
+#example_unique_scene|555988,1478277,564012,1483032|2024
+#example_unique_scene|555059,1548053,561657,1551909|2024
+#example_unique_scene|484932,1401912,489035,1405125|2019
+#example_unique_scene|-2176274,1884720,-2163674,1891377|2024
+#example_unique_scene|497386,1162710,547786,1218816|2024
+
+# --- MULTIPLE SCENES CONFIG ---
+#example_multiple_scene01|400270,1057332,452572,1099174|2020,2022
+#example_multiple_scene02|532452,1531857,556226,1548024|2020,2022
+#example_multiple_scene03|347016,861436,386005,897572|2020,2022
+#example_multiple_scene04|505825,1183809,526746,1257032|2020,2022
+#example_multiple_scene05|409779,1397773,443062,1426302|2020,2022
+#example_multiple_scene06|457327,1306482,495365,1333108|2020,2022
+#example_multiple_scene07|463032,1084910,483953,1108684|2020,2022
+#example_multiple_scene08|455425,1355931,495365,1386362|2020,2022
+#example_multiple_scene09|509629,1409185,535305,1437713|2020,2022
+#example_multiple_scene10|463983,1151477,499169,1175250|2020,2022
+#example_multiple_scene11|515335,1418694,530550,1438664|2020,2022

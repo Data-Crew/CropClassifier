@@ -1,0 +1,15 @@
+=== Configuración CropClassifier - mié 08 oct 2025 22:41:12 -03 ===
+
+CUDA Toolkit:
+Cuda compilation tools, release 12.2, V12.2.140
+
+NVIDIA Driver y GPU:
+565.57.01, NVIDIA GeForce RTX 4070, 12282 MiB
+
+TensorFlow:
+Version: 2.17.0
+
+GPU Detectada:
+[PhysicalDevice(name='/physical_device:GPU:0', device_type='GPU')]
+
+===============================================
