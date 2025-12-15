@@ -1071,7 +1071,7 @@ y = tf.one_hot(label, depth=len(label_legend))
 
 ---
 
-## 6. Training Workflow
+## 4. Training Workflow
 
 ### Dataset Generation & Class Balance
 
@@ -1256,7 +1256,7 @@ Input Time Series
 
 ---
 
-## 7. Training & Validation
+## 5. Training & Validation
 
 The training pipeline handles dataset preparation, batch generation, and class imbalance mitigation through several mechanisms.
 
@@ -1364,7 +1364,7 @@ python train.py \
 
 ---
 
-## 8. Evaluation
+## 6. Evaluation
 
 Comprehensive evaluation metrics are computed during both training and testing phases to assess model performance across all classes.
 
@@ -1471,7 +1471,7 @@ For crop classification tasks, the most important metrics are:
 
 ---
 
-## 9. Deployment / Inference
+## 7. Deployment / Inference
 
 The prediction pipeline applies trained models to new Sentinel-2 time series data and generates crop classification maps with confidence scores.
 
