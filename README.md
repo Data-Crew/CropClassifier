@@ -1258,17 +1258,428 @@ Input Time Series
 
 ## 7. Training & Validation
 
-- Splits, batch generation, class weighting.
+The training pipeline handles dataset preparation, batch generation, and class imbalance mitigation through several mechanisms.
+
+### Dataset Splits
+
+Training and validation datasets are separated by **year** using glob patterns in `config/dataloader.txt`:
+
+```ini
+[paths]
+train_path=data/valtrain/s2_multiple_scene.parquet/*/*2021*/*.parquet
+val_path=data/valtrain/s2_multiple_scene.parquet/*/*2020*/*.parquet
+test_path=data/test/s2_unique_scene.parquet/*/*2019*/*.parquet
+```
+
+This temporal split ensures that:
+- **Training data** comes from one year (e.g., 2021)
+- **Validation data** comes from a different year (e.g., 2020)
+- **Test data** is completely independent (e.g., 2019)
+
+This approach tests the model's ability to generalize across different growing seasons and weather conditions.
+
+### Batch Generation
+
+The data pipeline (`dataloader.py`) processes time series data through several stages:
+
+1. **Loading**: Parquet files are loaded using pandas (recommended) or TensorFlow I/O
+2. **Filtering**: Ambiguous samples (e.g., double croppings) are removed
+3. **Parsing**: Each row is transformed into `(X, y)` pairs:
+   - `X`: Time series tensor of shape `(max_images_per_series, num_features)`
+   - `y`: One-hot encoded label vector
+4. **Normalization**: Band values and spectral indices are z-score normalized using statistics computed from training data
+5. **Batching**: Samples are grouped into batches of configurable size (default: 1028)
+6. **Prefetching**: Batches are prefetched for optimal GPU utilization
+
+**Key Parameters**:
+- `batch_size`: Number of samples per batch (default: 1028)
+- `frames_to_check`: Number of temporal samples per series (affects dataset size)
+- `bucketing_strategy`: How to sample temporal windows (`random`, `early_season`, `late_season`, `deterministic`)
+
+### Class Weighting & Imbalance Handling
+
+The dataset exhibits significant class imbalance, with "Uncultivated" and "No Crop Growing" classes dominating. Several techniques address this:
+
+#### 1. Focal Loss with Annealed Alpha
+
+The best-performing model (`inception1d_se_mixup_focal_attention_residual`) uses **Focal Loss** with dynamically annealed class weights:
+
+- **Focal Loss**: Emphasizes hard-to-classify samples, reducing the impact of easy negatives
+- **Annealed Alpha**: Class weight for minority classes (especially "Cultivated") starts high and gradually decreases during training
+- **Target Class**: Specifically targets the "Cultivated" class, which is often ignored by other models
+
+```python
+# Example: Alpha starts at 1.3 and decreases over 15 epochs
+alpha_var = tf.Variable(1.3, trainable=False)
+# Annealed during training via AnnealedAlphaCallback
+```
+
+#### 2. MixUp Augmentation
+
+MixUp creates synthetic training samples by mixing pairs of samples:
+
+```python
+# Mix two samples: (x1, y1) and (x2, y2)
+lambda = Beta(alpha, alpha)  # alpha typically 0.2
+x_mixed = lambda * x1 + (1 - lambda) * x2
+y_mixed = lambda * y1 + (1 - lambda) * y2
+```
+
+This regularization technique:
+- Reduces overfitting
+- Improves generalization on minority classes
+- Creates smoother decision boundaries
+
+#### 3. Data Filtering
+
+Ambiguous samples are filtered out during preprocessing:
+- **Double croppings**: Locations with multiple crop types in a single season
+- **Invalid SCL values**: Samples with excessive cloud cover or invalid scene classifications
+
+### Training Process
+
+Training is executed via `train.py` or `cropclassifier.sh`:
+
+```bash
+# Train a model
+bash cropclassifier.sh -action train -model inception1d_se_mixup_focal_attention_residual
+
+# Or directly
+python train.py \
+    --model_name inception1d_se_mixup_focal_attention_residual \
+    --max_epochs 60 \
+    --es_patience 15
+```
+
+**Training Features**:
+- **Early Stopping**: Monitors validation categorical accuracy, stops if no improvement for `es_patience` epochs
+- **Model Checkpointing**: Saves best model based on validation metric
+- **TensorBoard Logging**: Tracks training metrics, loss curves, and validation performance
+- **Extended Metrics Callback**: Computes confusion matrices and classification reports after each epoch
+
+**Output Locations**:
+- Models: `results/models/{model_name}_{days_in_series}days.keras`
+- Logs: `results/logs/fit_{model_name}/{timestamp}/`
+- Metrics: Confusion matrices and classification reports saved per epoch
 
 ---
 
 ## 8. Evaluation
 
-- Metrics: Accuracy, F1, Confusion Matrix, etc.
+Comprehensive evaluation metrics are computed during both training and testing phases to assess model performance across all classes.
+
+### Metrics Computed
+
+#### During Training (Per Epoch)
+
+The `ExtendedMetricsCallback` computes and logs:
+
+- **Categorical Accuracy**: Overall classification accuracy
+- **Balanced Accuracy**: Average of per-class recall (handles class imbalance)
+- **Macro F1-Score**: Unweighted mean of per-class F1-scores
+- **Micro F1-Score**: Global F1-score computed from total TP, FP, FN
+- **Per-Class Recall**: Individual recall for each crop class
+- **Confusion Matrix**: Visual representation of classification errors
+
+These metrics are:
+- Logged to TensorBoard for visualization
+- Saved as text files (`classification_report_epoch_{N}.txt`)
+- Visualized as heatmaps (`confusion_matrix_epoch_{N}.png`)
+
+#### During Testing
+
+The `test.py` script computes comprehensive metrics:
+
+```bash
+# Run evaluation on test set
+bash cropclassifier.sh -action test -model inception1d_se_mixup_focal_attention_residual
+```
+
+**Metrics Output**:
+- **Overall Accuracy**: Percentage of correct predictions
+- **Weighted Precision/Recall/F1**: Metrics weighted by class frequency
+- **Macro F1-Score**: Unweighted mean across all classes
+- **Micro F1-Score**: Global F1-score
+- **Per-Class Metrics**: Precision, recall, F1, and support for each class
+
+### Confusion Matrix
+
+Confusion matrices are generated at multiple stages:
+
+1. **During Training**: After each epoch (via `ExtendedMetricsCallback`)
+2. **During Testing**: Final evaluation on test set
+3. **Visualization**: Saved as PNG files with class labels and color-coded heatmaps
+
+**Example Output**:
+```
+📊 CONFUSION MATRIX STATISTICS:
+==================================================
+📈 CLASSIFICATION REPORT:
+              precision    recall  f1-score   support
+
+Uncultivated       0.95      0.98      0.96    125000
+Cultivated         0.45      0.26      0.33      8500
+No Crop Growing    0.88      0.92      0.90     42000
+Soybeans           0.82      0.78      0.80     15000
+Rice               0.75      0.71      0.73      5200
+Corn               0.79      0.85      0.82     18000
+Cotton             0.68      0.62      0.65      3100
+
+🎯 OVERALL METRICS:
+Accuracy: 0.8412
+Precision: 0.8234
+Recall: 0.8412
+F1-Score: 0.8301
+```
+
+### Accuracy by Prediction Date
+
+The evaluation pipeline analyzes performance across different temporal windows (`start_day` values):
+
+- **Temporal Analysis**: Evaluates how prediction accuracy varies with different time windows
+- **Best/Worst Day Comparison**: Identifies optimal prediction dates for each crop type
+- **Visualization**: Generates plots showing accuracy trends over the growing season
+
+### Model Assessment Utilities
+
+The `utils/model_assessment.py` script provides comprehensive evaluation:
+
+```bash
+python utils/model_assessment.py \
+    --results-path results/test_zn3/test/predictions.parquet \
+    --output-dir results/test_zn3/test
+```
+
+**Generated Outputs**:
+- Confusion matrix (PNG)
+- Classification report (TXT)
+- Accuracy by date plots (PNG)
+- Best vs worst day comparison (PNG)
+- Class distribution analysis (TXT)
+- CDL vs predictions comparison maps (PNG/GIF)
+
+### Key Performance Indicators
+
+For crop classification tasks, the most important metrics are:
+
+1. **Recall for Minority Classes**: Especially "Cultivated" and individual crop types
+2. **Macro F1-Score**: Ensures all classes are considered equally important
+3. **Balanced Accuracy**: Accounts for class imbalance in accuracy calculation
+4. **Per-Class Precision**: Important for identifying false positives in crop detection
+
+> 🔍 **Note**: Most models achieve high overall accuracy (>84%) but struggle with minority classes. The `inception1d_se_mixup_focal_attention_residual` model is the only architecture that successfully improves recall on "Cultivated" while maintaining competitive overall performance.
 
 ---
 
 ## 9. Deployment / Inference
 
-- Applying the model to new data and reconstructing label maps.
+The prediction pipeline applies trained models to new Sentinel-2 time series data and generates crop classification maps with confidence scores.
+
+### Prediction Workflow
+
+#### Step 1: Prepare Input Data
+
+Input data must be in Parquet format with the same structure as training data:
+
+```
+data/new_data.parquet/
+├── bbox=390747,1195097,437820,1284288/
+│   ├── year=2024/
+│   │   ├── part-00000.parquet
+│   │   └── part-00001.parquet
+```
+
+Each Parquet file should contain columns:
+- `lon`, `lat`: Geographic coordinates
+- `bands`: Serialized time series of Sentinel-2 reflectance values
+- `scl_vals`: Scene Classification Layer values
+- `img_dates`: Acquisition dates (in days from start of series)
+- `num_images`: Number of temporal observations
+
+#### Step 2: Run Predictions
+
+Use `predict.py` or `cropclassifier.sh` to generate predictions:
+
+```bash
+# Using the wrapper script
+bash cropclassifier.sh -action predict \
+    -model inception1d_se_mixup_focal_attention_residual \
+    -input-path "data/new_data.parquet/*/*2024*/*.parquet" \
+    -output-path "results/predictions_2024" \
+    -save-probabilities \
+    -pred-year 2024
+
+# Or directly
+python predict.py \
+    --model_name inception1d_se_mixup_focal_attention_residual \
+    --input_path "data/new_data.parquet/*/*2024*/*.parquet" \
+    --output_dir "results/predictions_2024" \
+    --days_in_series 120 \
+    --save_probabilities
+```
+
+**Key Parameters**:
+- `--input_path`: Glob pattern matching Parquet files
+- `--output_dir`: Directory to save prediction results
+- `--days_in_series`: Temporal window length (must match training)
+- `--days_per_bucket`: Temporal bucketing interval (must match training)
+- `--bucketing_strategy`: How to sample temporal windows
+- `--save_probabilities`: Save per-class probability scores
+
+#### Step 3: Temporal Window Sampling
+
+Predictions are generated for multiple temporal windows (`start_day` values):
+
+- **Date Range**: Predictions are made across a range of start days (e.g., 0 to 200 days)
+- **Multiple Predictions**: Each location gets predictions for different time windows
+- **Temporal Analysis**: Allows analysis of how predictions change over the growing season
+
+This enables:
+- **Early Season Predictions**: Identify crops before full maturity
+- **Mid-Season Validation**: Confirm predictions as crops develop
+- **Late Season Analysis**: Final crop classification before harvest
+
+### Output Files
+
+The prediction script generates several output files:
+
+#### 1. Main Predictions File
+```
+predictions_{model_name}_{days_in_series}days.parquet
+```
+Contains:
+- `latitude`, `longitude`: Geographic coordinates
+- `predicted_class`: Integer class ID
+- `predicted_label`: Class name (e.g., "Corn", "Soybeans")
+- `confidence_score`: Maximum probability across all classes
+- `start_day`: Temporal window used for prediction
+- `prob_{class}`: Per-class probability scores (if `--save_probabilities`)
+
+#### 2. High-Confidence Predictions
+```
+high_confidence_{model_name}_{days_in_series}days.parquet
+```
+Contains only predictions with confidence ≥ 0.8, useful for:
+- Filtering uncertain predictions
+- Generating high-quality crop maps
+- Identifying areas requiring manual review
+
+#### 3. Confidence Analysis
+```
+confidence_{model_name}_{days_in_series}days.txt
+```
+Statistics including:
+- Average, min, max confidence scores
+- Confidence distribution by class
+- Sample counts per confidence threshold
+
+#### 4. Class Distribution
+```
+distribution_{model_name}_{days_in_series}days.txt
+```
+Predicted class counts and percentages.
+
+### Reconstructing Label Maps
+
+The `utils/report_utils.py` module provides functions to visualize predictions as geographic maps:
+
+#### Spatial Visualization
+
+```python
+from utils.report_utils import plot_cdl_vs_predictions, make_gif_from_pngs
+
+# Generate comparison maps (CDL ground truth vs predictions)
+plot_cdl_vs_predictions(
+    results=results_df,
+    start_days=[0, 30, 60, 90, 120, 150, 180],
+    export_pngs=True,
+    output_dir="results/predictions_2024"
+)
+
+# Create animated GIF showing predictions over time
+png_paths = glob.glob("results/predictions_2024/cdl_vs_pred_*.png")
+make_gif_from_pngs(
+    png_paths=png_paths,
+    gif_path="results/predictions_2024/animation_predictions.gif",
+    fps=1
+)
+```
+
+**Map Features**:
+- **Geographic Projection**: Uses EPSG:3857 (Web Mercator) for web-compatible visualization
+- **Basemap Overlay**: USGS satellite imagery provides geographic context
+- **Color-Coded Classes**: Each crop type has a distinct color matching CDL conventions
+- **Side-by-Side Comparison**: CDL ground truth vs model predictions
+- **Temporal Animation**: GIFs show how predictions evolve over the growing season
+
+#### Export Formats
+
+Predictions can be exported in multiple formats:
+
+1. **Parquet Files**: Efficient storage for large-scale predictions
+2. **GeoTIFF Rasters**: Convert point predictions to raster format for GIS software
+3. **Shapefiles**: Vector format for integration with mapping tools
+4. **PNG Maps**: Visual maps with basemap overlays
+5. **Animated GIFs**: Temporal sequences showing crop development
+
+### Integration with GIS Tools
+
+The prediction outputs can be integrated with GIS software:
+
+```python
+import geopandas as gpd
+import pandas as pd
+
+# Load predictions
+results = pd.read_parquet("results/predictions_2024/predictions.parquet")
+
+# Convert to GeoDataFrame
+gdf = gpd.GeoDataFrame(
+    results,
+    geometry=gpd.points_from_xy(results.longitude, results.latitude, crs="EPSG:4326")
+)
+
+# Reproject to desired CRS
+gdf = gdf.to_crs("EPSG:5070")  # Albers Equal Area Conic (USDA standard)
+
+# Export to shapefile
+gdf.to_file("results/predictions_2024/crop_predictions.shp")
+```
+
+### Production Deployment Considerations
+
+For production use, consider:
+
+1. **Batch Processing**: Process large areas in chunks to manage memory
+2. **Parallel Processing**: Use multiple GPUs or distributed computing for large datasets
+3. **Caching**: Cache normalization statistics and model weights
+4. **Error Handling**: Implement robust error handling for missing data or invalid inputs
+5. **Monitoring**: Track prediction confidence distributions and flag low-confidence areas
+6. **Validation**: Compare predictions with ground truth when available (e.g., CDL data)
+
+### Example: Full Prediction Pipeline
+
+```bash
+# 1. Download new Sentinel-2 data (if not already available)
+bash build_training_data.sh unique sentinel
+
+# 2. Transform to time series format
+bash build_training_data.sh unique transform
+
+# 3. Generate predictions
+bash cropclassifier.sh -action predict \
+    -model inception1d_se_mixup_focal_attention_residual \
+    -input-path "data/test/s2_unique_scene.parquet/*/*2024*/*.parquet" \
+    -output-path "results/predictions_2024" \
+    -save-probabilities \
+    -pred-year 2024
+
+# 4. Generate visualization maps
+python utils/model_assessment.py \
+    --results-path "results/predictions_2024/predictions.parquet" \
+    --output-dir "results/predictions_2024" \
+    --prediction-mode
+```
+
+This complete pipeline transforms raw Sentinel-2 imagery into actionable crop classification maps ready for agricultural decision-making.
 
